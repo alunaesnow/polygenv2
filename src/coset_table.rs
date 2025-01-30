@@ -12,7 +12,98 @@
 //
 // omega: live cosets set, where p(coset) = coset. always 1 in omega
 
-use std::{collections::VecDeque, rc::Rc};
+use std::{collections::VecDeque, ops::Mul, rc::Rc};
+
+use num_traits::Pow;
+
+#[derive(Clone, Copy)]
+struct Generator {
+    letter: char,
+    value: usize,
+    inverse: bool,
+}
+
+#[derive(Clone)]
+struct Word {
+    generators: Vec<Generator>,
+}
+
+impl Pow<i32> for Generator {
+    type Output = Word;
+
+    fn pow(self, exponent: i32) -> Self::Output {
+        let mut g = self.clone();
+        if exponent.signum() < 0 {
+            g.inverse = !g.inverse;
+        }
+        Word {
+            generators: vec![g; exponent.abs() as usize],
+        }
+    }
+}
+
+impl Pow<i32> for Word {
+    type Output = Word;
+
+    fn pow(self, exponent: i32) -> Self::Output {
+        let abs = exponent.abs();
+        let is_inverse = exponent.signum() < 0;
+        let mut generators = Vec::with_capacity(self.generators.len() * abs as usize);
+        for _ in 0..abs {
+            for g in &self.generators {
+                let mut new_g = g.clone();
+                if is_inverse {
+                    new_g.inverse = !new_g.inverse;
+                }
+                generators.push(new_g);
+            }
+        }
+        Word { generators }
+    }
+}
+
+impl Mul<Generator> for Generator {
+    type Output = Word;
+
+    fn mul(self, rhs: Generator) -> Self::Output {
+        Word {
+            generators: vec![self.clone(), rhs.clone()],
+        }
+    }
+}
+
+impl Mul<Word> for Generator {
+    type Output = Word;
+
+    fn mul(self, rhs: Word) -> Self::Output {
+        let mut generators = Vec::with_capacity(rhs.generators.len() + 1);
+        generators.extend_from_slice(&rhs.generators);
+        generators.push(self);
+        Word { generators }
+    }
+}
+
+impl Mul<Generator> for Word {
+    type Output = Word;
+
+    fn mul(self, rhs: Generator) -> Self::Output {
+        let mut generators = Vec::with_capacity(self.generators.len() + 1);
+        generators.push(rhs);
+        generators.extend_from_slice(&self.generators);
+        Word { generators }
+    }
+}
+
+impl Mul<Word> for Word {
+    type Output = Word;
+
+    fn mul(self, rhs: Word) -> Self::Output {
+        let mut generators = Vec::with_capacity(self.generators.len() + rhs.generators.len());
+        generators.extend_from_slice(&self.generators);
+        generators.extend_from_slice(&rhs.generators);
+        Word { generators }
+    }
+}
 
 /// An implementation of the HLT (Hasselgrove, Leech and Trotter) strategy, for solving
 /// the coset enumeration problem.
@@ -342,7 +433,7 @@ impl CosetTable {
     pub fn solve(&mut self, max_iter: usize) {
         if !self.is_solved {
             self.coset_numerator_r(max_iter);
-            // self.compress();
+            self.compress();
             // self.standerdize();
             self.is_solved = true;
         }

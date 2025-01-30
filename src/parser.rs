@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, f64::consts::PI, fmt::Display};
 
 const VALID_NODES: [char; 21] = [
     'o', 'v', 'x', 's', 'm', 'p', 'ß', 'q', 'f', 'h', 'k', 'u', 'w', 'F', 'Q', 'd', 'V', 'U', 'A',
@@ -46,7 +46,7 @@ pub enum CombineMethod {
     LaceRing,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum NodeType {
     Inactive,
     Standard,
@@ -437,4 +437,71 @@ pub fn parse_ascii_coxeter_diagram(mut diagram: &str) -> Result<PolytopeDescript
         edge_matrix: M,
         subpolytopes,
     })
+}
+
+// /**
+//  * Places a set of mirrors given a symmetry matrix S, where S[i][j] = k means
+//  * the i-th and j-th mirrors have an angle of PI/k between them. Returns the
+//  * normals of the mirrors.
+//  *
+//  * Taken from: https://github.com/neozhaoliang/pywonderland/blob/master/src/polytopes/polytopes/helpers.py
+//  */
+// function placeMirrors(symmetryMatrix: number[][]) {
+//     const C = symmetryMatrix.map((row) => row.map((x) => -Math.cos(Math.PI / x)));
+//     const M = C.map((row) => row.map(() => 0));
+//     const n = M.length;
+//     // The first normal vector is simply (1, 0, ..., 0)
+//     M[0][0] = 1;
+//     // In the i-th row, the j-th entry can be computed via the (j, j) entry
+//     for (let i = 1; i < n; i++) {
+//       for (let j = 0; j < i; j++) {
+//         const mj_colonj = M[j].slice(0, j);
+//         const mi_colonj = M[i].slice(0, j);
+//         M[i][j] = (C[i][j] - vm.dot(mj_colonj, mi_colonj)) / M[j][j];
+//       }
+//       const mi_coloni = M[i].slice(0, i);
+//       M[i][i] = Math.sqrt(1 - vm.dot(mi_coloni, mi_coloni));
+//     }
+//     return M;
+//   }
+
+impl PolytopeDescription {
+    /// Places a set of mirrors given a symmetry matrix S, where S[i][j] = k means
+    /// the i-th and j-th mirrors have an angle of PI/k between them. Returns the
+    /// normals of the mirrors. Note these are (n-1)-dimensional mirrors, so in 2d
+    /// space they are lines, in 3d they are planes, in 4d volumes etc...
+    ///
+    /// Taken from: https://github.com/neozhaoliang/pywonderland/blob/master/src/polytopes/polytopes/helpers.py
+    pub fn place_mirrors(&self) -> Vec<Vec<f64>> {
+        let n = self.edge_matrix.len();
+        let C: Vec<Vec<f64>> = self
+            .edge_matrix
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|v| -(PI / (f64::from(v.0) / f64::from(v.1))).cos())
+                    .collect()
+            })
+            .collect();
+        let mut M = vec![vec![0f64; n]; n];
+        // The first normal vector is simply (1, 0, ..., 0)
+        M[0][0] = 1.0;
+        // In the i-th row, the j-th entry can be computed via the (j, j) entry
+        for i in 0..n {
+            for j in 0..i {
+                let mut dot = 0.0;
+                for k in 0..j {
+                    dot += M[j][k] * M[i][k];
+                }
+                M[i][j] = (C[i][j] - dot) / M[j][j];
+            }
+            let mut dot = 0.0;
+            for k in 0..i {
+                dot += M[i][k] * M[i][k];
+            }
+            M[i][i] = (1.0 - dot).sqrt();
+        }
+
+        M
+    }
 }
