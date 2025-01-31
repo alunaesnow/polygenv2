@@ -446,4 +446,28 @@ impl CosetTable {
     pub fn print_table(&self) {
         println!("{:?}", self.table);
     }
+
+    /// Returns the representative words for each coset. These are in the same
+    /// order as the cosets, so `r[i]` is the representative for coset `i`.
+    pub fn get_representatives(&self) -> Vec<Vec<usize>> {
+        let mut reprs = vec![Vec::new(); self.table.len()];
+        let mut q = VecDeque::new();
+        q.push_back(0);
+        while let Some(coset) = q.pop_front() {
+            for g in (0..self.n_gen).step_by(if self.is_coxeter { 1 } else { 2 }) {
+                match self.table[coset][g] {
+                    Some(next) => {
+                        if reprs[next].is_empty() {
+                            reprs[next] = reprs[coset].clone();
+                            reprs[next].push(g);
+                            q.push_back(next);
+                        }
+                    }
+                    None => panic!("Found empty entry, is the coset table solved?"),
+                }
+            }
+        }
+
+        reprs
+    }
 }

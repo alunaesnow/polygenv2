@@ -1,5 +1,7 @@
 use std::{collections::HashMap, f64::consts::PI, fmt::Display};
 
+use ndarray::{s, Array1, Array2};
+
 const VALID_NODES: [char; 21] = [
     'o', 'v', 'x', 's', 'm', 'p', 'ß', 'q', 'f', 'h', 'k', 'u', 'w', 'F', 'Q', 'd', 'V', 'U', 'A',
     'X', 'B',
@@ -64,10 +66,12 @@ pub struct PolytopeDescription {
     pub diagram: String,
     /// Specifies how to combine all the polytopes found in subpolytopes
     pub combine_method: CombineMethod,
-    /// Edge length matrix
-    /// M[i][j] = (n, d) means the i-th and j-th nodes are connected by an edge
-    /// with nominator `n` and denumerator `d`
-    pub edge_matrix: Vec<Vec<(u32, u32)>>,
+    /// Common symmetryMatrix for all subpolytopes S[i][j] = k means the i-th and
+    /// j-th mirrors have an angle of PI/k between them.
+    pub symmetry_matrix: Array2<f64>,
+    /// Common coxeterMatrix for all subpolytopes C[i][j] = k means the i-th and
+    /// j-th generators have the relation (ij)^k = I.
+    pub coxeter_matrix: Array2<u32>,
     /// Subpolytopes to combine, if `combine_method` is None this will have size 1
     pub subpolytopes: Vec<SubpolytopeDescription>,
 }
@@ -75,7 +79,7 @@ pub struct PolytopeDescription {
 #[derive(Clone, Debug)]
 pub struct SubpolytopeDescription {
     /// Offsets from the mirrors to place the initial vertex v0
-    pub offsets: Vec<f64>,
+    pub offsets: Array1<f64>,
     /// node types
     pub nodes: Vec<NodeType>,
 }
@@ -290,12 +294,13 @@ pub fn parse_ascii_coxeter_diagram(mut diagram: &str) -> Result<PolytopeDescript
     node_count = node_count / subpolytope_count;
 
     // Prepare the data structures
-    let mut M = vec![vec![(2u32, 1u32); node_count]; node_count];
+    let mut coxeter_matrix = Array2::from_elem((node_count, node_count), 2u32);
+    let mut symmetry_matrix = Array2::from_elem((node_count, node_count), 2.0);
 
     let mut subpolytopes = vec![
         SubpolytopeDescription {
             nodes: Vec::new(),
-            offsets: vec![0.0; node_count]
+            offsets: Array1::zeros(node_count)
         };
         subpolytope_count
     ];
@@ -352,11 +357,8 @@ pub fn parse_ascii_coxeter_diagram(mut diagram: &str) -> Result<PolytopeDescript
     let mut from: usize = 0;
     let mut to: usize = 0;
     let mut i: usize = 0;
-    // println!("diagram: {}", diagram);
     while i < diagram.len() {
-        // println!("{}", i);
         if !prev_was_edge {
-            // println!("parsing edge");
             // If a vnode exists before the edge value, then we need to jump
             // to the vnode's target node
             if chars[i] == '*' {
@@ -395,11 +397,13 @@ pub fn parse_ascii_coxeter_diagram(mut diagram: &str) -> Result<PolytopeDescript
                 ));
             }
 
-            M[from][to] = (n, d);
-            M[to][from] = (n, d);
+            let f = f64::from(n) / f64::from(d);
+            coxeter_matrix[[from, to]] = n;
+            coxeter_matrix[[to, from]] = n;
+            symmetry_matrix[[from, to]] = f;
+            symmetry_matrix[[to, from]] = f;
             prev_was_edge = true;
         } else {
-            // println!("parsing nodes");
             // We are processing nodes
             for s in 0..subpolytope_count {
                 let subpoly = &mut subpolytopes[s];
@@ -434,7 +438,8 @@ pub fn parse_ascii_coxeter_diagram(mut diagram: &str) -> Result<PolytopeDescript
     Ok(PolytopeDescription {
         diagram: original_diagram,
         combine_method,
-        edge_matrix: M,
+        coxeter_matrix,
+        symmetry_matrix,
         subpolytopes,
     })
 }
@@ -472,36 +477,23 @@ impl PolytopeDescription {
     /// space they are lines, in 3d they are planes, in 4d volumes etc...
     ///
     /// Taken from: https://github.com/neozhaoliang/pywonderland/blob/master/src/polytopes/polytopes/helpers.py
-    pub fn place_mirrors(&self) -> Vec<Vec<f64>> {
-        let n = self.edge_matrix.len();
-        let C: Vec<Vec<f64>> = self
-            .edge_matrix
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|v| -(PI / (f64::from(v.0) / f64::from(v.1))).cos())
-                    .collect()
-            })
-            .collect();
-        let mut M = vec![vec![0f64; n]; n];
+    pub fn place_mirrors(&self) -> Array2<f64> {
+        let c = -(PI / self.symmetry_matrix.clone()).cos();
+
+        let mut mirrors = Array2::<f64>::zeros(self.symmetry_matrix.raw_dim());
         // The first normal vector is simply (1, 0, ..., 0)
-        M[0][0] = 1.0;
+        mirrors[[0, 0]] = 1.0;
         // In the i-th row, the j-th entry can be computed via the (j, j) entry
+        let n = self.symmetry_matrix.shape()[0];
         for i in 0..n {
             for j in 0..i {
-                let mut dot = 0.0;
-                for k in 0..j {
-                    dot += M[j][k] * M[i][k];
-                }
-                M[i][j] = (C[i][j] - dot) / M[j][j];
+                let dot = mirrors.slice(s![j, 0..j]).dot(&mirrors.slice(s![i, 0..j]));
+                mirrors[[i, j]] = (c[[i, j]] - dot) / mirrors[[j, j]];
             }
-            let mut dot = 0.0;
-            for k in 0..i {
-                dot += M[i][k] * M[i][k];
-            }
-            M[i][i] = (1.0 - dot).sqrt();
+            let dot = mirrors.slice(s![i, 0..i]).dot(&mirrors.slice(s![i, 0..i]));
+            mirrors[[i, i]] = (1.0 - dot).sqrt();
         }
 
-        M
+        mirrors
     }
 }
